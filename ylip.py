@@ -54,13 +54,8 @@ elevenlabs_voice = os.getenv('ELEVENLABS_VOICE')
 gpt_child_prompt = os.getenv('PROMPT_THEME')
 gpt_pre_prompt = os.getenv('PROMPT_PRE')
 gpt_image_prompt = os.getenv('PROMPT_IMAGE')
-try:
-    with open(os.getenv('PROMPT_OUTPUT_FORMAT'), 'r') as file:
-        gpt_format_prompt = file.read()
-except FileNotFoundError:
-    print("Error: PROMPT_OUTPUT_FORMAT file not found.")
-    gpt_format_prompt = ""
-
+with open(os.getenv('PROMPT_OUTPUT_FORMAT'), 'r') as file:
+    gpt_format_prompt = file.read()
 
 
 ############################
