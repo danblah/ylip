@@ -1,3 +1,4 @@
+**/.DS_Store
 .env
-static/db.json
+data/db.json
 static/stories
