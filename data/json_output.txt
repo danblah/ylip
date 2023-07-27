@@ -1,0 +1,17 @@
+Output the story and paragraphs as JSON, following the example below:
+{
+ "story":{
+   "story_paragraph_1":"Generated story text here",
+   "story_paragraph_2":"Generated story text here",
+   "story_paragraph_3":"Generated story text here",
+   "story_paragraph_4":"Generated story text here",
+   "story_paragraph_5":"Generated story text here"
+ },
+ "image_prompts":{
+  "image_prompt_1":"Generated text-to-image prompt here",
+  "image_prompt_2":"Generated text-to-image prompt here",
+  "image_prompt_3":"Generated text-to-image prompt here",
+  "image_prompt_4":"Generated text-to-image prompt here",
+  "image_prompt_5":"Generated text-to-image prompt here"
+ }
+}
