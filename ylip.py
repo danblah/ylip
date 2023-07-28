@@ -104,10 +104,9 @@ def home():
         movie_element = f"<video width='320' height='240' controls><source src='/{movie_file}' type='video/mp4'></video>"
         direct_link = f"<a href='/{movie_file}'>Video link</a>"
     else:
-        movie_element = """
-            <p>There is no movie available</p>
-        """
+        movie_element = ""
         direct_link = ""
+        initial_movie_status = "Try generating a new movie."
     html = f"""
     <html>
         <head>
@@ -115,11 +114,14 @@ def home():
             <meta name="viewport" content="width=device-width, initial-scale=1">
             <style>
                 /* Responsive layout - makes the menu and the content stack on top of each other */
-                @media (max-width: 600px) {{
+                @media (max-width: 800px) {{
                   .column {{
                     width: 100%;
                     display: block;
                     margin-bottom: 20px;
+                  }}
+                  body {{
+                    font-size: 1.5em; /* Adjust this value to your liking */
                   }}
                 }}
                 /* Make the paragraph text slightly larger, a more standard easy to read size, responsive */
@@ -152,9 +154,14 @@ def home():
 
                 /* Highlight the id messages with a light grey bar, make the text slightly smaller and italic */
                 #message_movie, #message_story, #prompt_status {{
-                    background-color: lightgrey;
+                    color: darkgreen;
                     font-size: 0.9em;
                     font-style: italic;
+                }}
+
+                .fade-out {{
+                    transition: opacity 5s ease-in-out;
+                    opacity: 20%;
                 }}
             </style>
 
@@ -163,7 +170,11 @@ def home():
                 var socket = io();
 
                 socket.on('prompt_status', function(msg) {{
-                    document.getElementById('prompt_status').innerHTML = msg.status;
+                    var element = document.getElementById('prompt_status');
+                    element.classList.remove('fade-out'); // Remove the fade-out class
+                    element.innerHTML = msg.status;
+                    setTimeout(function() {{ fadeOut('prompt_status'); }}, 3000);
+
                 }});
 
                 function savePromptTheme() {{
@@ -182,7 +193,6 @@ def home():
                     console.log('Save image prompt button pressed');
                 }};
                 function generateStory() {{
-                    document.getElementById('spinner_story').style.display = 'block';
                     document.getElementById('generate_story').style.display = 'none';
                     document.getElementById('story').style.display = 'none';
                     document.getElementById('movie').style.display = 'none'; // Hide the current movie when "Generate a new story" has been pressed
@@ -198,7 +208,6 @@ def home():
                     }}
                     document.getElementById('story').innerHTML = story_text;
                     document.getElementById('story').style.display = 'block';
-                    document.getElementById('spinner_story').style.display = 'none';
                     document.getElementById('generate_story').style.display = 'block';
                     location.reload(); // Reload the page after the new story has finished generating
                 }});
@@ -224,6 +233,10 @@ def home():
                     socket.emit('create_movie');
                     console.log('Generate new movie button pressed');
                 }};
+                function fadeOut(id) {{
+                    var element = document.getElementById(id);
+                    element.classList.add('fade-out');
+                }}
             </script>
 
         </head>
@@ -232,7 +245,7 @@ def home():
             <div class="column">
                 <h2>Story time</h2>
                 <h3>Current prompts</h3>
-                <p id="prompt_status"></p>
+                <p id="prompt_status">Start by saving a prompt</p>
                 <h4>Child's main theme prompt</h4>
                 <p><textarea id="prompt_theme">{gpt_child_prompt}</textarea></p>
                 <p><button onclick="savePromptTheme()" type="button" value="submit">Save theme prompt</button></p>
@@ -249,13 +262,13 @@ def home():
             </div>
             <div class="column">
                 <h3>Current story</h3>
-                <p id="message_story"></p>
+                <p id="message_story">Try generating a new story.</p>
                 <div id="story" style="display: block;">{story_text}</div>
                 <button id="generate_story" onclick="generateStory()" type="button">Generate a new story</button>
             </div>
             <div class="column">
                 <h3>Current movie</h3>
-                <p id="message_movie"></p>
+                <p id="message_movie">{initial_movie_status}</p>
                 <div id="movie" style="display: block;">{movie_element}</div>
                 <p id="direct_link" style="display: block;">{direct_link}</p>
                 <button id="generate_movie" onclick="generateMovie()" type="button" style="display: block;">Generate a new movie</button>
@@ -323,7 +336,7 @@ def generate_story():
                 'Okay, let me think...',
                 'Shhhh... Loud noise distracts me!',
                 'Here we go, got an idea...',
-                'Where did I put my pencil...',
+                'Now, where did I put my pencil...',
                 'Oh no! Do you have any paper???',
                 'Getting warmed up now...',
                 'Creative juices are really flowing!!!',
