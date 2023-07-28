@@ -1,0 +1,12 @@
+openai
+elevenlabs
+tinydb
+flask
+flask_socketio
+simple_websocket
+gevent
+Pillow
+moviepy
+python-dotenv
+requests
+gunicorn

@@ -1,37 +1,36 @@
 # Import required libraries
-from dotenv import load_dotenv
 import os
 import uuid
 import inspect
-import openai
 import requests
 import base64
 import time
+from itertools import cycle
 import threading
 import sys
 import glob
 import json
-
-from PIL import Image
-
+import shutil
 from io import BytesIO
-from tinydb import TinyDB, Query
-
-from flask import Flask, render_template_string, request, jsonify
 from threading import Thread
+
+from dotenv import load_dotenv
+import openai
+from elevenlabs import generate, save
+
+from tinydb import TinyDB, Query
+from flask import Flask, render_template_string, request, jsonify
 from flask_socketio import SocketIO, emit
 import simple_websocket
 import gevent
 
-import shutil
+from PIL import Image
 from moviepy.editor import ImageClip, AudioFileClip, concatenate_videoclips
 import moviepy.video.fx.all as vfx
 
-from elevenlabs import generate, save
-
-load_dotenv()
-
 ############################
+# Import .env variables
+load_dotenv()
 
 # Define API keys
 openai.api_key = os.getenv('OPENAI_KEY')
@@ -75,6 +74,7 @@ story_data = ""
 
 app = Flask(__name__, static_folder='static')
 socketio = SocketIO(app, async_mode='threading')
+app.secret_key = os.getenv('SECRET_KEY')
 
 @app.route("/", methods=['GET', 'POST'])
 def home():
@@ -106,7 +106,6 @@ def home():
     else:
         movie_element = """
             <p>There is no movie available</p>
-            <button id="generate_movie" onclick="generateMovie()" type="button" style="display: block;">Generate a new movie</button>
         """
         direct_link = ""
     html = f"""
@@ -116,11 +115,11 @@ def home():
             <meta name="viewport" content="width=device-width, initial-scale=1">
             <style>
                 /* Responsive layout - makes the menu and the content stack on top of each other */
-                @media (max-width: 1024px) {{
+                @media (max-width: 600px) {{
                   .column {{
                     width: 100%;
                     display: block;
-                    margin: 0 auto;
+                    margin-bottom: 20px;
                   }}
                 }}
                 /* Make the paragraph text slightly larger, a more standard easy to read size, responsive */
@@ -150,34 +149,23 @@ def home():
                     resize: vertical;
                     overflow: auto;
                 }}
+
+                /* Highlight the id messages with a light grey bar, make the text slightly smaller and italic */
+                #message_movie, #message_story, #prompt_status {{
+                    background-color: lightgrey;
+                    font-size: 0.9em;
+                    font-style: italic;
+                }}
             </style>
 
-
-            <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+            <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js" integrity="sha512-q/dWJ3kcmjBLU4Qc47E4A9kTB4m3wuTY7vkFJDTZKjTs8jhyGQnaUrxa0Ytd0ssMZhbNua9hE+E7Qv1j+DyZwA==" crossorigin="anonymous"></script>
             <script>
-                var socket = io.connect('http://' + document.domain + ':' + location.port);
-                var intervalId = null;
-                var dotCount = 0;
-                socket.on('new_story', function(msg) {{
-                    var story_paragraphs = msg.story;
-                    var story_text = "";
-                    for (var key in story_paragraphs) {{
-                        story_text += "<p>" + story_paragraphs[key] + "</p>";
-                    }}
-                    document.getElementById('story').innerHTML = story_text;
-                    document.getElementById('story').style.display = 'block';
-                    document.getElementById('spinner_story').style.display = 'none';
-                    document.getElementById('generate_story').style.display = 'block';
-                    clearInterval(intervalId);
-                    location.reload(); // Reload the page after the new story has finished generating
+                var socket = io();
+
+                socket.on('prompt_status', function(msg) {{
+                    document.getElementById('prompt_status').innerHTML = msg.status;
                 }});
-                socket.on('prompt_saved', function(msg) {{
-                    document.getElementById('save_status').innerHTML = msg.status;
-                    document.getElementById('story').style.display = 'none';
-                    document.getElementById('movie').style.display = 'none';
-                    document.getElementById('generate_story').style.display = 'block';
-                    document.getElementById('generate_movie').style.display = 'block';
-                }});
+
                 function savePromptTheme() {{
                     var prompt_theme = document.getElementById('prompt_theme').value;
                     socket.emit('save_prompt_theme', prompt_theme);
@@ -188,7 +176,7 @@ def home():
                     socket.emit('save_prompt_pre', prompt_pre);
                     console.log('Save pre-prompt button pressed');
                 }};
-                function savePromptImage() {{c
+                function savePromptImage() {{
                     var prompt_image = document.getElementById('prompt_image').value;
                     socket.emit('save_prompt_image', prompt_image);
                     console.log('Save image prompt button pressed');
@@ -201,86 +189,79 @@ def home():
                     document.getElementById('direct_link').style.display = 'none'; // Hide the "Video link" url when "Generate a new story" has been pressed
                     socket.emit('generate_story');
                     console.log('Generate new story button pressed');
-                    intervalId = setInterval(function() {{
-                        dotCount = (dotCount + 1) % 4;
-                        var dots = new Array(dotCount + 1).join(".");
-                        document.getElementById('spinner_story').innerHTML = 'Generating story (~30s)' + dots;
-                    }}, 1000);
                 }};
-
-                function generateMovie() {{
-                    var movie_file = '/static/stories/{story_id}/{story_id}_movie.mp4';
-                    var xhr = new XMLHttpRequest();
-                    xhr.open('HEAD', movie_file, false);
-                    xhr.send();
-                    if (xhr.status == "404") {{
-                        document.getElementById('spinner_movie').style.display = 'block';
-                        document.getElementById('generate_movie').style.display = 'block';
-                        document.getElementById('movie').style.display = 'none';
-                        socket.emit('create_movie');
-                        console.log('Generate new movie button pressed');
-                        intervalId = setInterval(function() {{
-                            dotCount = (dotCount + 1) % 4;
-                            var dots = new Array(dotCount + 1).join(".");
-                            document.getElementById('spinner_movie').innerHTML = 'Generating movie (~60s)' + dots;
-                        }}, 1000);
-                    }} else {{
-                        console.log('Movie already exists');
-                        document.getElementById('generate_movie').style.display = 'none'; // Show the "Generate a new movie" button if movie already exists
+                socket.on('new_story', function(msg) {{
+                    var story_paragraphs = msg.story;
+                    var story_text = "";
+                    for (var key in story_paragraphs) {{
+                        story_text += "<p>" + story_paragraphs[key] + "</p>";
                     }}
-                }};
-
-                socket.on('movie_created', function(msg) {{
-                    var movie_file = '/static/stories/{story_id}/{story_id}_movie.mp4';
-                    var xhr = new XMLHttpRequest();
-                    xhr.open('HEAD', movie_file, false);
-                    xhr.send();
-                    if (xhr.status == "404") {{
-                        console.log('Movie not yet ready');
-                    }} else {{
-                        console.log('Movie ready');
-                        document.getElementById('movie').innerHTML = "<video width='100%' height='auto' controls><source src='" + movie_file + "' type='video/mp4'></video>";
-                        document.getElementById('movie').style.display = 'block';
-                        document.getElementById('spinner_movie').style.display = 'none';
-                        document.getElementById('generate_movie').style.display = 'block'; // Show the "Generate a new movie" button when movie is ready
-                        document.getElementById('direct_link').style.display = 'block'; // Show the "Video link" url when movie is ready
-                        clearInterval(intervalId);
-                        location.reload(); // Reload the page after the new movie has finished generating
-                    }}
+                    document.getElementById('story').innerHTML = story_text;
+                    document.getElementById('story').style.display = 'block';
+                    document.getElementById('spinner_story').style.display = 'none';
+                    document.getElementById('generate_story').style.display = 'block';
+                    location.reload(); // Reload the page after the new story has finished generating
                 }});
-
+                socket.on('story_status', function(msg) {{
+                    document.getElementById('message_story').innerHTML = msg.status;
+                }});
+                socket.on('movie_status', function(msg) {{
+                    document.getElementById('message_movie').innerHTML = msg.status;
+                    var movie_file = '/static/stories/' + story_id + '/' + story_id + '_movie.mp4';
+                }});
+                socket.on('new_movie', function(msg) {{
+                    console.log('Movie ready');
+                    document.getElementById('movie').innerHTML = "<video width='100%' height='auto' controls><source src='" + msg.status + "' type='video/mp4'></video>";
+                    document.getElementById('movie').style.display = 'block';
+                    document.getElementById('generate_movie').style.display = 'block'; // Show the "Generate a new movie" button when movie is ready
+                    document.getElementById('direct_link').style.display = 'block'; // Show the "Video link" url when movie is ready
+                    location.reload(); // Reload the page after the new movie has finished generating
+                }});
+                function generateMovie() {{
+                    document.getElementById('generate_movie').style.display = 'none';
+                    document.getElementById('movie').style.display = 'none'; // Hide the current movie when "Generate a new movie" has been pressed
+                    document.getElementById('direct_link').style.display = 'none'; // Hide the "Video link" url when "Generate a new movie" has been pressed
+                    socket.emit('create_movie');
+                    console.log('Generate new movie button pressed');
+                }};
             </script>
 
         </head>
         <body>
             <h1>A Young Lady's Illustrated Primer</h1>
             <div class="column">
-                <h2>Current prompts</h2>
-                <h3>Child's main theme prompt</h3>
+                <h2>Story time</h2>
+                <h3>Current prompts</h3>
+                <p id="prompt_status"></p>
+                <h4>Child's main theme prompt</h4>
                 <p><textarea id="prompt_theme">{gpt_child_prompt}</textarea></p>
                 <p><button onclick="savePromptTheme()" type="button" value="submit">Save theme prompt</button></p>
                 <details>
                     <summary>Additional Prompts</summary>
-                    <h3>Story pre-prompt</h3>
+                    <h4>Story pre-prompt</h4>
                     <p><textarea id="prompt_pre">{gpt_pre_prompt}</textarea></p>
                     <p><button onclick="savePromptPre()" type="button">Save pre-prompt</button></p>
-                    <h3>Image generation pre-prompt</h3>
+                    <h4>Image generation pre-prompt</h4>
                     <p><textarea id="prompt_image">{gpt_image_prompt}</textarea></p>
                     <p><button onclick="savePromptImage()" type="button">Save image prompt</button></p>
                 </details>
                 <p id="save_status"></p>
             </div>
             <div class="column">
-                <h2>Current story</h2>
+                <h3>Current story</h3>
+                <p id="message_story"></p>
                 <div id="story" style="display: block;">{story_text}</div>
                 <button id="generate_story" onclick="generateStory()" type="button">Generate a new story</button>
-                <div id="spinner_story" style="display: none;">Generating story...</div>
             </div>
             <div class="column">
-                <h2>Current movie</h2>
+                <h3>Current movie</h3>
+                <p id="message_movie"></p>
                 <div id="movie" style="display: block;">{movie_element}</div>
                 <p id="direct_link" style="display: block;">{direct_link}</p>
-                <div id="spinner_movie" style="display: none;">Generating movie...</div>
+                <button id="generate_movie" onclick="generateMovie()" type="button" style="display: block;">Generate a new movie</button>
+            </div>
+            <div class="column">
+              <h2>Question time</h2>
             </div>
         </body>
     </html>
@@ -288,35 +269,20 @@ def home():
     """
     return render_template_string(html)
 
+
 @socketio.on('save_prompt_theme')
 def handle_save_prompt(prompt_theme):
     global gpt_child_prompt
     gpt_child_prompt = prompt_theme
-    emit('prompt_saved', {'status': 'Theme prompt saved successfully!'})
+    emit('prompt_status', {'status': 'Theme prompt saved successfully!'})
 
     print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - Saved new prompt_theme: {gpt_child_prompt}")
-
-@socketio.on('create_movie')
-def handle_create_movie():
-    try:
-        print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - Running create_movie")
-        thread = Thread(target=create_movie)
-        thread.start()
-        thread.join()  # Wait for the create_movie function to finish
-        emit('movie_created', {'status': 'Movie creation completed!'})
-        print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - Movie creation completed!")
-
-    except Exception as e:
-        print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - Error in create_movie: {e}")
-
-
-
 
 @socketio.on('save_prompt_pre')
 def handle_save_prompt(prompt_pre):
     global gpt_pre_prompt
     gpt_pre_prompt = prompt_pre
-    emit('prompt_saved', {'status': 'Pre prompt saved successfully!'})
+    emit('prompt_status', {'status': 'Pre prompt saved successfully!'})
 
     print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - Saved new prompt_pre: {gpt_pre_prompt}")
 
@@ -324,68 +290,94 @@ def handle_save_prompt(prompt_pre):
 def handle_save_prompt(prompt_image):
     global gpt_image_prompt
     gpt_image_prompt = prompt_image
-    emit('prompt_saved', {'status': 'Image prompt saved successfully!'})
+    emit('prompt_status', {'status': 'Image prompt saved successfully!'})
 
     print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - Saved new prompt_image: {gpt_image_prompt}")
 
 @socketio.on('generate_story')
-def handle_generate_story():
+def generate_story():
+    global unique_id, story_data, gpt_child_prompt, gpt_pre_prompt, gpt_format_prompt, db
+
+    print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Starting")
     try:
-        print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - Running generate")
-        thread = Thread(target=generate_story)
+        gpt_full_prompt = gpt_pre_prompt + " The story's main theme is: " + gpt_child_prompt + "\n" + gpt_image_prompt + "\n" + gpt_format_prompt
+
+        # Generate new story text
+        print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: About to request a new story, here's the prompt:" + "\n" + gpt_full_prompt)
+        emit('story_status', {'status': 'Generating a new story'})
+        
+        def generate_completion():
+            global completion
+            completion = openai.ChatCompletion.create(
+                model="gpt-4",
+                max_tokens=4096,
+                temperature=0.15,
+                top_p=1,
+                messages=[
+                    {"role": "user", "content": gpt_full_prompt}
+                ]
+            )
+
+        def emit_status():
+            messages = cycle([
+                'Okay, let me think...',
+                'Shhhh... Loud noise distracts me!',
+                'Here we go, got an idea...',
+                'Where did I put my pencil...',
+                'Oh no! Do you have any paper???',
+                'Getting warmed up now...',
+                'Creative juices are really flowing!!!',
+                'Just putting on the finishing touches...',
+                'Almost done...'
+            ])
+            while thread.is_alive():
+                socketio.emit('story_status', {'status': next(messages)}, namespace='/')
+                time.sleep(5)
+
+        thread = threading.Thread(target=generate_completion)
         thread.start()
 
-    except Exception as e:
-        print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - Error in generate: {e}")
+        emit_thread = threading.Thread(target=emit_status)
+        emit_thread.start()
 
+        thread.join()
+        emit_thread.join()
 
-def generate_audio():
-    global db
-    try:
-        print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Running generate_audio")
+       
+        # Remove leading and trailing quotes from story_text
+        story_text = completion.choices[0].message.content.strip('"')
+        print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Got a new story: " + "\n" + story_text)
+        emit('story_status', {'status': 'Here comes a brand new story!'})
+        # Load the JSON data from story_text
+        # Added json.loads() inside a try-except block to handle JSONDecodeError
+        try:
+            # Replace escaped double quotes with actual double quotes
+            story_text = story_text.replace('\\"', '"')
+            story_data = json.loads(story_text)
 
-        # Get the most recent story from the database
-        stories = db.all()
-        stories.sort(key=lambda x: x['timestamp'], reverse=True)
-        story_data = stories[0]['story_data']
-        story_id = stories[0]['unique_id']
-        story_folder = 'static/stories/' + story_id
+            # Insert the prompts as a separate objects in the story_data dictionary
+            story_data.update({"prompt_child": gpt_child_prompt})
+            story_data.update({"prompt_pre": gpt_pre_prompt})
+            story_data.update({"prompt_image": gpt_image_prompt})
 
-        # Initialize an empty dictionary for audio_urls
-        story_data["audio_urls"] = {}
+        except json.JSONDecodeError as json_err:
+            print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Error in parsing JSON: {json_err}")
+            return
 
-        print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: print story_data: {story_data}")
+        # Save the contents of story_data to db.json with a timestamp
+        db.insert({'timestamp': time.time(), 'unique_id': unique_id, 'story_data': story_data})
 
-        # Check if a directory named story_id exists. if not create it.
-        if not os.path.exists(story_folder):
-            os.makedirs(story_folder, exist_ok=True)
-
-        i = 1
-        while f"story_paragraph_{i}" in story_data["story"]:
-            text = story_data["story"][f"story_paragraph_{i}"]
-            
-            print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Generating new audio, text: {text}")
-
-            audio_bytes = generate(
-                api_key=elevenlabs_api_key,
-                text=text,
-                voice="Bella",
-                model="eleven_monolingual_v1"
-            )
-
-            # Save the audio file as story_paragraph_{i}.wav in the unique_id directory
-            filename = f"{story_folder}/{story_id}_story_paragraph_{i}.wav"
-            save(
-                audio=audio_bytes,               # Audio bytes (returned by generate)
-                filename=filename,               # Filename to save audio to
-            )
-            i += 1
+        # Emit the new story to the client
+        socketio.emit('new_story', {'story': story_data['story']})
 
     except Exception as e:
-        print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Error in generate_audio function: {e}")
+        print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Error in function: {e}")
 
+@socketio.on('create_movie')
 def create_movie():
     global db
+
+    print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - Running create_movie")
 
     # Get the most recent story from the database
     stories = db.all()
@@ -411,6 +403,7 @@ def create_movie():
     try:
         if video_clip:
             print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Existing video clip, skipping creation")
+            emit('movie_status', {'status': 'Existing movie, skipping creation'})
     except Exception as e:
         print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: error checking for existing video clip {e}")
 
@@ -420,8 +413,15 @@ def create_movie():
 
             # Check if audio_clips exist. if not, generate audio_clips
             print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Checking for existing audio clips")
+            try:
+                emit('movie_status', {'status': 'Checking for existing audio files'})
+            except RuntimeError as e:
+                print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Error emitting status: {e}")
+                return
+
             if not audio_clips:
                 print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: No audio files, generating")
+                emit('movie_status', {'status': 'No audio files, generating audio files'})
                 generate_audio()
                 # Wait for the audio files to be generated before proceeding
                 # Check for each story_paragraph in story_data
@@ -439,26 +439,31 @@ def create_movie():
         if not video_clip:
             # Check if images exist. if not, generate them
             print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Checking for existing image files")
+            emit('movie_status', {'status': 'Checking for existing image files'})
 
             if not image_clips:
                 print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: No image files")
                 # Check if there is an image_urls object within story_data
                 if "image_urls" not in story_data:
                     print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: No image files, generating")
+                    emit('movie_status', {'status': 'No image files, generating'})
                     # If not, run the generate_images() function and wait until the function completes
                     generate_images()
                     while "image_urls" not in story_data:
                         time.sleep(1)
 
                 # Check if the image_urls are responding 403, if so regenerate images
-                print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Checking if images are expired")        
+                print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Checking if images are expired") 
+                emit('movie_status', {'status': 'Checking if image URLs have expired'})       
                 image_url = story_data["image_urls"][f"image_url_1"]
                 response = requests.get(image_url)
                 if response.status_code == 403:
                     print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Image urls expired, regenerating images")
+                    emit('movie_status', {'status': 'Image urls expired, regenerating images'})
                     generate_images()
 
                     print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Image regeneration success")
+                    emit('movie_status', {'status': 'Image regeneration success'})
 
     except Exception as e:
         print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Image regeneration error: {e}")
@@ -468,6 +473,7 @@ def create_movie():
 
             # Download images
             print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: downloading images")
+            emit('movie_status', {'status': 'Downloading images'})
             i = 1
             while True:
                 image_filename = f"{story_folder}/{story_id}_image_url_{i}.png"
@@ -486,9 +492,11 @@ def create_movie():
                         break
                 i += 1
             print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {__name__}: images downloaded")
+            emit('movie_status', {'status': 'Images downloaded'})
 
             # Generate video clips from the audio_clips and image_clips
             print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {__name__}: creating movie clips")
+            emit('movie_status', {'status': 'Combining the audio and image files into video clips'})
             i = 1
             video_clips = []  # Initialize video_clips as an empty list
             while True:
@@ -506,59 +514,14 @@ def create_movie():
             # Create a single video from all of the video_clips
             if video_clips:
                 print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {__name__}: creating the movie")
+                emit('movie_status', {'status': 'Combining video clips into a single movie'})
 
                 final_video = concatenate_videoclips(video_clips)
                 final_video.write_videofile(f"{story_folder}/{story_id}_movie.mp4", fps=24, codec='libx264', audio_codec='aac')
                     
                 print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {__name__}: movie created success")
-
-
-
-def generate_story():
-    global unique_id, story_data, gpt_child_prompt, gpt_pre_prompt, gpt_format_prompt, db
-    try:
-        gpt_full_prompt = gpt_pre_prompt + " The story's main theme is: " + gpt_child_prompt + "\n" + gpt_image_prompt + "\n" + gpt_format_prompt
-
-        # Generate new story text
-        print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - About to request a new story, here's the prompt:" + "\n" + gpt_full_prompt)
-        completion = openai.ChatCompletion.create(
-            model="gpt-4",
-            max_tokens=4096,
-            temperature=0.15,
-            top_p=1,
-            messages=[
-                {"role": "user", "content": gpt_full_prompt}
-            ]
-        )
-       
-        # Remove leading and trailing quotes from story_text
-        story_text = completion.choices[0].message.content.strip('"')
-        print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - Got a new story: " + "\n" + story_text)
-
-        # Load the JSON data from story_text
-        # Added json.loads() inside a try-except block to handle JSONDecodeError
-        try:
-            # Replace escaped double quotes with actual double quotes
-            story_text = story_text.replace('\\"', '"')
-            story_data = json.loads(story_text)
-
-            # Insert the prompts as a separate objects in the story_data dictionary
-            story_data.update({"prompt_child": gpt_child_prompt})
-            story_data.update({"prompt_pre": gpt_pre_prompt})
-            story_data.update({"prompt_image": gpt_image_prompt})
-
-        except json.JSONDecodeError as json_err:
-            print(f"Error in parsing JSON: {json_err}")
-            return
-
-        # Save the contents of story_data to db.json with a timestamp
-        db.insert({'timestamp': time.time(), 'unique_id': unique_id, 'story_data': story_data})
-
-        # Emit the new story to the client
-        socketio.emit('new_story', {'story': story_data['story']})
-
-    except Exception as e:
-        print(f"Error in story generate_story function: {e}")
+                emit('movie_status', {'status': 'Movie creation success'})
+                emit('new_movie', {'status': f"{story_folder}/{story_id}_movie.mp4"})
 
 # Generate images for each image_prompt in story_data, save the image URLs, and update the database
 def generate_images():
@@ -606,6 +569,51 @@ def generate_images():
     except Exception as e:
         print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - Error in generate_images function: {e}\n")
 
+def generate_audio():
+    global db
+    try:
+        print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Running generate_audio")
+
+        # Get the most recent story from the database
+        stories = db.all()
+        stories.sort(key=lambda x: x['timestamp'], reverse=True)
+        story_data = stories[0]['story_data']
+        story_id = stories[0]['unique_id']
+        story_folder = 'static/stories/' + story_id
+
+        # Initialize an empty dictionary for audio_urls
+        story_data["audio_urls"] = {}
+
+        print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: print story_data: {story_data}")
+
+        # Check if a directory named story_id exists. if not create it.
+        if not os.path.exists(story_folder):
+            os.makedirs(story_folder, exist_ok=True)
+
+        i = 1
+        while f"story_paragraph_{i}" in story_data["story"]:
+            text = story_data["story"][f"story_paragraph_{i}"]
+            
+            print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Generating new audio, text: {text}")
+
+            audio_bytes = generate(
+                api_key=elevenlabs_api_key,
+                text=text,
+                voice="Bella",
+                model="eleven_monolingual_v1"
+            )
+
+            # Save the audio file as story_paragraph_{i}.wav in the unique_id directory
+            filename = f"{story_folder}/{story_id}_story_paragraph_{i}.wav"
+            save(
+                audio=audio_bytes,               # Audio bytes (returned by generate)
+                filename=filename,               # Filename to save audio to
+            )
+            i += 1
+
+    except Exception as e:
+        print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Error in generate_audio function: {e}")
+
 if __name__ == '__main__':
-    socketio.run(app, debug = True)
+    socketio.run(app,port=5000,debug=True)
     serve(app)
