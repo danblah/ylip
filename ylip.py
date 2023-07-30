@@ -105,10 +105,11 @@ def home():
     if movie_file and os.path.isfile(movie_file):
         movie_element = f"<video width='320' height='240' controls><source src='/{movie_file}' type='video/mp4'></video>"
         direct_link = f"<a href='/{movie_file}'>Video link</a>"
+        initial_movie_status = "To generate a new movie, first generate a new story."
     else:
         movie_element = ""
         direct_link = ""
-        initial_movie_status = "Try generating a new movie."
+        initial_movie_status = ""
     html = f"""
     <html>
         <head>
@@ -264,7 +265,7 @@ def home():
             </div>
             <div class="column">
                 <h3>Current story</h3>
-                <p id="message_story">Try generating a new story.</p>
+                <p id="message_story"></p>
                 <div id="story" style="display: block;">{story_text}</div>
                 <button id="generate_story" onclick="generateStory()" type="button">Generate a new story</button>
             </div>
@@ -419,6 +420,8 @@ def create_movie():
         if video_clip:
             print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Existing video clip, skipping creation")
             emit('movie_status', {'status': 'Existing movie, skipping creation'})
+            emit('new_movie', {'status': f"{story_folder}/{story_id}_movie.mp4"})
+
     except Exception as e:
         print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: error checking for existing video clip {e}")
 
@@ -436,7 +439,7 @@ def create_movie():
 
             if not audio_clips:
                 print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: No audio files, generating")
-                emit('movie_status', {'status': 'No audio files, generating audio files'})
+                emit('movie_status', {'status': 'Creating text-to-speech audio files'})
                 generate_audio()
                 # Wait for the audio files to be generated before proceeding
                 # Check for each story_paragraph in story_data
@@ -461,7 +464,7 @@ def create_movie():
                 # Check if there is an image_urls object within story_data
                 if "image_urls" not in story_data:
                     print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: No image files, generating")
-                    emit('movie_status', {'status': 'Generating new images'})
+                    emit('movie_status', {'status': 'Generating new images to go with the story'})
                     # If not, run the generate_images() function and wait until the function completes
                     generate_images()
                     while "image_urls" not in story_data:
@@ -488,7 +491,7 @@ def create_movie():
 
             # Download images
             print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: downloading images")
-            emit('movie_status', {'status': 'Downloading images'})
+            emit('movie_status', {'status': 'Downloading images to use in the video'})
             i = 1
             while True:
                 image_filename = f"{story_folder}/{story_id}_image_url_{i}.png"
