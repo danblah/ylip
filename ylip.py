@@ -83,6 +83,8 @@ def home():
     stories = db.all()
     story = None
     story_id = None
+    initial_movie_status = "Try generating a new movie."
+
     if stories:
         stories.sort(key=lambda x: x['timestamp'], reverse=True)
         story = stories[0]['story_data']
@@ -459,7 +461,7 @@ def create_movie():
                 # Check if there is an image_urls object within story_data
                 if "image_urls" not in story_data:
                     print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: No image files, generating")
-                    emit('movie_status', {'status': 'No image files, generating'})
+                    emit('movie_status', {'status': 'Generating new images'})
                     # If not, run the generate_images() function and wait until the function completes
                     generate_images()
                     while "image_urls" not in story_data:
