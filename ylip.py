@@ -19,7 +19,7 @@ import openai
 from elevenlabs import generate, save
 
 from tinydb import TinyDB, Query
-from flask import Flask, render_template_string, request, jsonify
+from flask import Flask, render_template_string, request, jsonify, render_template
 from flask_socketio import SocketIO, emit
 import simple_websocket
 import gevent
@@ -35,7 +35,6 @@ load_dotenv()
 # Define API keys
 openai.api_key = os.getenv('OPENAI_KEY')
 elevenlabs_api_key = os.getenv('ELEVENLABS_KEY')
-elai_api_key = os.getenv('ELAI_KEY')
 
 # Define OpenAI settings
 openai_gpt_model = os.getenv('OPENAI_MODEL')
@@ -59,8 +58,9 @@ with open(os.getenv('PROMPT_OUTPUT_FORMAT'), 'r') as file:
 
 ############################
 
-# Define database
-db = TinyDB('data/'+ os.getenv('DB_NAME'))
+# Define databases
+db = TinyDB('data/'+ os.getenv('DB_CONTENT'))
+db_config = TinyDB('data/'+ os.getenv('DB_CONFIG'))
 
 # Generate a unique 7 character id
 unique_id = str(uuid.uuid4())[:7]
@@ -72,13 +72,39 @@ story_data = ""
 ############################
 
 
-app = Flask(__name__, static_folder='static')
+app = Flask(__name__, static_folder='./static')
 socketio = SocketIO(app, async_mode='threading')
 app.secret_key = os.getenv('SECRET_KEY')
+
+@app.route("/settings", methods=['GET', 'POST'])
+def settings():
+    routes = {
+        str(rule): rule.endpoint.replace('_', ' ').title() 
+        for rule in app.url_map.iter_rules() if not 'static' in rule.rule
+    }
+    if request.method == 'POST':
+        for key, value in request.form.items():
+            if key in os.environ:
+                os.environ[key] = value
+                # set_key('.env', key, value) # Commented out as set_key is not defined
+        return "Settings updated successfully!"
+    else:
+        env_vars = {
+            key: ('*****' if 'key' in key.lower() else os.getenv(key), 'prompt' in key.lower())
+            for key in sorted(os.environ.keys())
+            if key in open('.env').read() and key != '_'
+        }
+        
+        return render_template('settings.html', env_vars=env_vars, routes=routes)
 
 @app.route("/", methods=['GET', 'POST'])
 def home():
     global db, gpt_child_prompt, gpt_pre_prompt, gpt_image_prompt
+
+    routes = {
+        str(rule): rule.endpoint.replace('_', ' ').title() 
+        for rule in app.url_map.iter_rules() if not 'static' in rule.rule
+    }
     # Get the most recent story from the database
     stories = db.all()
     story = None
@@ -110,181 +136,16 @@ def home():
         movie_element = ""
         direct_link = ""
         initial_movie_status = ""
-    html = f"""
-    <html>
-        <head>
-            <title>A Young Lady's Illustrated Primer</title>
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-            <style>
-                /* Responsive layout - makes the menu and the content stack on top of each other */
-                @media (max-width: 800px) {{
-                  .column {{
-                    width: 100%;
-                    display: block;
-                    margin-bottom: 20px;
-                  }}
-                  body {{
-                    font-size: 1.5em; /* Adjust this value to your liking */
-                  }}
-                }}
-                /* Make the paragraph text slightly larger, a more standard easy to read size, responsive */
-                p {{
-                    font-size: 1.2em;
-                }}
-                /* Make the video responsive and take up the whole width of the body available */
-                video {{
-                    width: 80%;
-                    height: auto;
-                }}
-                /* Center all elements, set the maximum width, and add a margin to the right and left sides */
-                body {{
-                    display: flex;
-                    flex-direction: column;
-                    align-items: left;
-                    max-width: 1024px;
-                    margin: 0 auto;
-                    padding: 0 25px;
-                    font-family: 'Ubuntu', sans-serif;
-                }}
-
-                /* Make the textarea full width and auto resize to the amount of text */
-                textarea {{
-                    width: 100%;
-                    min-height: 50px;
-                    resize: vertical;
-                    overflow: auto;
-                }}
-
-                /* Highlight the id messages with a light grey bar, make the text slightly smaller and italic */
-                #message_movie, #message_story, #prompt_status {{
-                    color: darkgreen;
-                    font-size: 0.9em;
-                    font-style: italic;
-                }}
-
-                .fade-out {{
-                    transition: opacity 5s ease-in-out;
-                    opacity: 20%;
-                }}
-            </style>
-
-            <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js" integrity="sha512-q/dWJ3kcmjBLU4Qc47E4A9kTB4m3wuTY7vkFJDTZKjTs8jhyGQnaUrxa0Ytd0ssMZhbNua9hE+E7Qv1j+DyZwA==" crossorigin="anonymous"></script>
-            <script>
-                var socket = io();
-
-                socket.on('prompt_status', function(msg) {{
-                    var element = document.getElementById('prompt_status');
-                    element.classList.remove('fade-out'); // Remove the fade-out class
-                    element.innerHTML = msg.status;
-                    setTimeout(function() {{ fadeOut('prompt_status'); }}, 3000);
-
-                }});
-
-                function savePromptTheme() {{
-                    var prompt_theme = document.getElementById('prompt_theme').value;
-                    socket.emit('save_prompt_theme', prompt_theme);
-                    console.log('Save theme prompt button pressed');
-                }};
-                function savePromptPre() {{
-                    var prompt_pre = document.getElementById('prompt_pre').value;
-                    socket.emit('save_prompt_pre', prompt_pre);
-                    console.log('Save pre-prompt button pressed');
-                }};
-                function savePromptImage() {{
-                    var prompt_image = document.getElementById('prompt_image').value;
-                    socket.emit('save_prompt_image', prompt_image);
-                    console.log('Save image prompt button pressed');
-                }};
-                function generateStory() {{
-                    document.getElementById('generate_story').style.display = 'none';
-                    document.getElementById('story').style.display = 'none';
-                    document.getElementById('movie').style.display = 'none'; // Hide the current movie when "Generate a new story" has been pressed
-                    document.getElementById('direct_link').style.display = 'none'; // Hide the "Video link" url when "Generate a new story" has been pressed
-                    socket.emit('generate_story');
-                    console.log('Generate new story button pressed');
-                }};
-                socket.on('new_story', function(msg) {{
-                    var story_paragraphs = msg.story;
-                    var story_text = "";
-                    for (var key in story_paragraphs) {{
-                        story_text += "<p>" + story_paragraphs[key] + "</p>";
-                    }}
-                    document.getElementById('story').innerHTML = story_text;
-                    document.getElementById('story').style.display = 'block';
-                    document.getElementById('generate_story').style.display = 'block';
-                    location.reload(); // Reload the page after the new story has finished generating
-                }});
-                socket.on('story_status', function(msg) {{
-                    document.getElementById('message_story').innerHTML = msg.status;
-                }});
-                socket.on('movie_status', function(msg) {{
-                    document.getElementById('message_movie').innerHTML = msg.status;
-                    var movie_file = '/static/stories/' + story_id + '/' + story_id + '_movie.mp4';
-                }});
-                socket.on('new_movie', function(msg) {{
-                    console.log('Movie ready');
-                    document.getElementById('movie').innerHTML = "<video width='100%' height='auto' controls><source src='" + msg.status + "' type='video/mp4'></video>";
-                    document.getElementById('movie').style.display = 'block';
-                    document.getElementById('generate_movie').style.display = 'block'; // Show the "Generate a new movie" button when movie is ready
-                    document.getElementById('direct_link').style.display = 'block'; // Show the "Video link" url when movie is ready
-                    location.reload(); // Reload the page after the new movie has finished generating
-                }});
-                function generateMovie() {{
-                    document.getElementById('generate_movie').style.display = 'none';
-                    document.getElementById('movie').style.display = 'none'; // Hide the current movie when "Generate a new movie" has been pressed
-                    document.getElementById('direct_link').style.display = 'none'; // Hide the "Video link" url when "Generate a new movie" has been pressed
-                    socket.emit('create_movie');
-                    console.log('Generate new movie button pressed');
-                }};
-                function fadeOut(id) {{
-                    var element = document.getElementById(id);
-                    element.classList.add('fade-out');
-                }}
-            </script>
-
-        </head>
-        <body>
-            <h1>A Young Lady's Illustrated Primer</h1>
-            <div class="column">
-                <h2>Story time</h2>
-                <h3>Current prompts</h3>
-                <p id="prompt_status">Start by saving a prompt</p>
-                <h4>Child's main theme prompt</h4>
-                <p><textarea id="prompt_theme">{gpt_child_prompt}</textarea></p>
-                <p><button onclick="savePromptTheme()" type="button" value="submit">Save theme prompt</button></p>
-                <details>
-                    <summary>Additional Prompts</summary>
-                    <h4>Story pre-prompt</h4>
-                    <p><textarea id="prompt_pre">{gpt_pre_prompt}</textarea></p>
-                    <p><button onclick="savePromptPre()" type="button">Save pre-prompt</button></p>
-                    <h4>Image generation pre-prompt</h4>
-                    <p><textarea id="prompt_image">{gpt_image_prompt}</textarea></p>
-                    <p><button onclick="savePromptImage()" type="button">Save image prompt</button></p>
-                </details>
-                <p id="save_status"></p>
-            </div>
-            <div class="column">
-                <h3>Current story</h3>
-                <p id="message_story"></p>
-                <div id="story" style="display: block;">{story_text}</div>
-                <button id="generate_story" onclick="generateStory()" type="button">Generate a new story</button>
-            </div>
-            <div class="column">
-                <h3>Current movie</h3>
-                <p id="message_movie">{initial_movie_status}</p>
-                <div id="movie" style="display: block;">{movie_element}</div>
-                <p id="direct_link" style="display: block;">{direct_link}</p>
-                <button id="generate_movie" onclick="generateMovie()" type="button" style="display: block;">Generate a new movie</button>
-            </div>
-            <div class="column">
-              <h2>Question time</h2>
-            </div>
-        </body>
-    </html>
-
-    """
-    return render_template_string(html)
-
+        
+    return render_template('index.html', 
+                           gpt_child_prompt=gpt_child_prompt, 
+                           gpt_pre_prompt=gpt_pre_prompt, 
+                           gpt_image_prompt=gpt_image_prompt, 
+                           story_text=story_text, 
+                           movie_element=movie_element, 
+                           direct_link=direct_link, 
+                           initial_movie_status=initial_movie_status,
+                           routes=routes)
 
 @socketio.on('save_prompt_theme')
 def handle_save_prompt(prompt_theme):

@@ -1,0 +1,108 @@
+/* Responsive layout - makes the menu and the content stack on top of each other */
+@media (max-width: 800px) {
+.column {
+    width: 100%;
+    display: block;
+    margin-bottom: 20px;
+}
+body {
+    font-size: 1.5em; /* Adjust this value to your liking */
+}
+}
+/* Make the paragraph text slightly larger, a more standard easy to read size, responsive */
+p {
+    font-size: 1.2em;
+}
+/* Make the video responsive and take up the whole width of the body available */
+video {
+    width: 80%;
+    height: auto;
+}
+
+
+/* Center all elements, set the maximum width, and add a margin to the right and left sides */
+body {
+    display: flex;
+    flex-direction: column;
+    align-items: left;
+    margin: 0 auto;
+    font-family: 'Ubuntu', sans-serif;
+    padding-top: 50px; /* Adjust this value to the height of your menu bar */
+}
+.content {
+    max-width: 1024px; /* Add max-width to .content */
+    margin: 0 auto; /* Center .content */
+}
+
+/* Make the textarea full width and auto resize to the amount of text */
+textarea {
+    width: 100%;
+    min-height: 50px;
+    resize: vertical;
+    overflow: auto;
+}
+
+/* Highlight the id messages with a light grey bar, make the text slightly smaller and italic */
+#message_movie, #message_story, #prompt_status {
+    color: darkgreen;
+    font-size: 0.9em;
+    font-style: italic;
+}
+
+.fade-out {
+    transition: opacity 5s ease-in-out;
+    opacity: 20%;
+}
+
+.form-label {
+    font-size: 1.2em;
+    font-weight: bold;
+    margin-top: 20px;
+}
+
+.form-input {
+    width: 100%;
+    padding: 10px;
+    margin-bottom: 10px;
+    font-size: 1em;
+}
+
+.menu-bar {
+    position: fixed;
+    top: 0;
+    width: 100%;
+    background-color: lightgrey;
+    z-index: 1;
+    text-align: center;
+    padding: 10px 0; /* Add space on the top and bottom */
+}
+
+.menu-text {
+    padding: 12px 16px;
+    cursor: pointer;
+    text-transform: uppercase; /* Make the text all caps */
+}
+
+.dropdown-content {
+    display: none;
+    position: fixed; /* Change from absolute to fixed */
+    width: 100%; /* Set width to 100% */
+    top: 0; /* Set top to 0 */
+    left: 0; /* Set left to 0 */
+    background-color: #f9f9f9;
+    box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
+    z-index: 1;
+    text-align: center; /* Center the links */
+}
+
+.dropdown-content a {
+    color: black;
+    padding: 12px 16px;
+    text-decoration: none;
+    display: block;
+    text-align: center; /* Center the links */
+}
+
+.menu-bar:hover .dropdown-content {
+    display: block;
+}

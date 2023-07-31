@@ -1,0 +1,129 @@
+<html>
+    <head>
+        <title>A Young Lady's Illustrated Primer</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <link rel="stylesheet" type="text/css" href="{{ url_for('static',filename='css/style.css') }}" />
+
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js" integrity="sha512-q/dWJ3kcmjBLU4Qc47E4A9kTB4m3wuTY7vkFJDTZKjTs8jhyGQnaUrxa0Ytd0ssMZhbNua9hE+E7Qv1j+DyZwA==" crossorigin="anonymous"></script>
+        <script>
+            var socket = io();
+
+            socket.on('prompt_status', function(msg) {
+                var element = document.getElementById('prompt_status');
+                element.classList.remove('fade-out'); // Remove the fade-out class
+                element.innerHTML = msg.status;
+                setTimeout(function() { fadeOut('prompt_status'); }, 3000);
+
+            });
+
+            function savePromptTheme() {
+                var prompt_theme = document.getElementById('prompt_theme').value;
+                socket.emit('save_prompt_theme', prompt_theme);
+                console.log('Save theme prompt button pressed');
+            };
+            function savePromptPre() {
+                var prompt_pre = document.getElementById('prompt_pre').value;
+                socket.emit('save_prompt_pre', prompt_pre);
+                console.log('Save pre-prompt button pressed');
+            };
+            function savePromptImage() {
+                var prompt_image = document.getElementById('prompt_image').value;
+                socket.emit('save_prompt_image', prompt_image);
+                console.log('Save image prompt button pressed');
+            };
+            function generateStory() {
+                document.getElementById('generate_story').style.visibility = 'hidden';
+                document.getElementById('story').style.visibility = 'hidden';
+                document.getElementById('movie').style.visibility = 'hidden';
+                document.getElementById('direct_link').style.visibility = 'hidden';
+                socket.emit('generate_story');
+                console.log('Generate new story button pressed');
+            };
+            socket.on('new_story', function(msg) {
+                var story_paragraphs = msg.story;
+                var story_text = "";
+                for (var key in story_paragraphs) {
+                    story_text += "<p>" + story_paragraphs[key] + "</p>";
+                }
+                document.getElementById('story').innerHTML = story_text;
+                document.getElementById('story').style.display = 'block';
+                document.getElementById('generate_story').style.display = 'block';
+                location.reload(); // Reload the page after the new story has finished generating
+            });
+            socket.on('story_status', function(msg) {
+                document.getElementById('message_story').innerHTML = msg.status;
+            });
+            socket.on('movie_status', function(msg) {
+                document.getElementById('message_movie').innerHTML = msg.status;
+                var movie_file = '/static/stories/' + story_id + '/' + story_id + '_movie.mp4';
+            });
+            socket.on('new_movie', function(msg) {
+                console.log('Movie ready');
+                document.getElementById('movie').innerHTML = "<video width='100%' height='auto' controls><source src='" + msg.status + "' type='video/mp4'></video>";
+                document.getElementById('movie').style.display = 'block';
+                document.getElementById('generate_movie').style.display = 'block'; // Show the "Generate a new movie" button when movie is ready
+                document.getElementById('direct_link').style.display = 'block'; // Show the "Video link" url when movie is ready
+                location.reload(); // Reload the page after the new movie has finished generating
+            });
+            function generateMovie() {
+                document.getElementById('generate_movie').style.display = 'none';
+                document.getElementById('movie').style.display = 'none'; // Hide the current movie when "Generate a new movie" has been pressed
+                document.getElementById('direct_link').style.display = 'none'; // Hide the "Video link" url when "Generate a new movie" has been pressed
+                socket.emit('create_movie');
+                console.log('Generate new movie button pressed');
+            };
+            function fadeOut(id) {
+                var element = document.getElementById(id);
+                element.classList.add('fade-out');
+            }
+        </script>
+
+    </head>
+    <body>
+        <div class="menu-bar">
+            <span class="menu-text">Menu</span>
+            <div class="dropdown-content">
+              {% for route, name in routes.items() %}
+              <a href="{{ route }}">{{ name }}</a>
+              {% endfor %}
+            </div>
+        </div>
+        <div class="content">
+            <h1>A Young Lady's Illustrated Primer</h1>
+            <div class="column">
+                <h2>Story time</h2>
+                <h3>Current prompts</h3>
+                <p id="prompt_status">Start by saving a prompt</p>
+                <h4>Child's main theme prompt</h4>
+                <p><textarea id="prompt_theme">{{gpt_child_prompt}}</textarea></p>
+                <p><button onclick="savePromptTheme()" type="button" value="submit">Save theme prompt</button></p>
+                <details>
+                    <summary>Additional Prompts</summary>
+                    <h4>Story pre-prompt</h4>
+                    <p><textarea id="prompt_pre">{{gpt_pre_prompt}}</textarea></p>
+                    <p><button onclick="savePromptPre()" type="button">Save pre-prompt</button></p>
+                    <h4>Image generation pre-prompt</h4>
+                    <p><textarea id="prompt_image">{{gpt_image_prompt}}</textarea></p>
+                    <p><button onclick="savePromptImage()" type="button">Save image prompt</button></p>
+                </details>
+                <p id="save_status"></p>
+            </div>
+            <div class="column">
+                <h3>Current story</h3>
+                <p id="message_story"></p>
+                <div id="story" style="display: block;">{{story_text|safe}}</div>
+                <button id="generate_story" onclick="generateStory()" type="button">Generate a new story</button>
+            </div>
+            <div class="column">
+                <h3>Current movie</h3>
+                <p id="message_movie">{{initial_movie_status}}</p>
+                <div id="movie" style="display: block;">{{movie_element|safe}}</div>
+                <p id="direct_link" style="display: block;">{{direct_link|safe}}</p>
+                <button id="generate_movie" onclick="generateMovie()" type="button" style="display: block;">Generate a new movie</button>
+            </div>
+            <div class="column">
+            <h2>Question time</h2>
+            </div>
+        </div>
+    </body>
+</html>
