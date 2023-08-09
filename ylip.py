@@ -59,7 +59,7 @@ with open(os.getenv('PROMPT_OUTPUT_FORMAT'), 'r') as file:
 ############################
 
 # Define databases
-db = TinyDB('data/'+ os.getenv('DB_CONTENT'))
+db_content = TinyDB('data/'+ os.getenv('DB_CONTENT'))
 db_config = TinyDB('data/'+ os.getenv('DB_CONFIG'))
 
 # Generate a unique 7 character id
@@ -67,7 +67,12 @@ unique_id = str(uuid.uuid4())[:7]
 
 start_time = time.time()
 
-story_data = ""
+# setup variables for the current story
+stories = db_content.all()
+stories.sort(key=lambda x: x['timestamp'], reverse=True)
+story_data = stories[0]['story_data']
+story_id = stories[0]['unique_id']
+story_folder = 'static/stories/' + story_id
 
 ############################
 
@@ -101,14 +106,13 @@ def settings():
 def home():
     global db, gpt_child_prompt, gpt_pre_prompt, gpt_image_prompt
 
+    global stories, story_data, story_id, story_folder
+
     routes = {
         str(rule): rule.endpoint.replace('_', ' ').title() 
         for rule in app.url_map.iter_rules() if not 'static' in rule.rule
     }
-    # Get the most recent story from the database
-    stories = db.all()
-    story = None
-    story_id = None
+
     initial_movie_status = "Try generating a new movie."
 
     if stories:
@@ -173,7 +177,9 @@ def handle_save_prompt(prompt_image):
 
 @socketio.on('generate_story')
 def generate_story():
-    global unique_id, story_data, gpt_child_prompt, gpt_pre_prompt, gpt_format_prompt, db
+    global unique_id, gpt_child_prompt, gpt_pre_prompt, gpt_format_prompt, db
+    global stories, story_data, story_id, story_folder
+
 
     print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Starting")
     try:
@@ -252,16 +258,9 @@ def generate_story():
 
 @socketio.on('create_movie')
 def create_movie():
-    global db
+    global stories, story_data, story_id, story_folder
 
     print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - Running create_movie")
-
-    # Get the most recent story from the database
-    stories = db.all()
-    stories.sort(key=lambda x: x['timestamp'], reverse=True)
-    story_data = stories[0]['story_data']
-    story_id = stories[0]['unique_id']
-    story_folder = 'static/stories/' + story_id
 
     # Check if a directory named static/stories/story_id exists. if not create it.
     if not os.path.exists(story_folder):
@@ -277,142 +276,125 @@ def create_movie():
     # In the directory named story_id, check if audio files already exist.
     audio_clips = glob.glob(f"{story_folder}/*.wav")
 
-    try:
-        if video_clip:
-            print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Existing video clip, skipping creation")
-            emit('movie_status', {'status': 'Existing movie, skipping creation'})
-            emit('new_movie', {'status': f"{story_folder}/{story_id}_movie.mp4"})
-
-    except Exception as e:
-        print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: error checking for existing video clip {e}")
+    #Check if everything exists to make a movie
 
     try:
-        if not video_clip:
-            #Check if everything exists to make a movie
+        # Check if audio_clips exist. if not, generate audio_clips
+        print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Checking for existing audio clips")
+        try:
+            emit('movie_status', {'status': 'Checking for existing audio files'})
+        except RuntimeError as e:
+            print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Error emitting status: {e}")
+            return
 
-            # Check if audio_clips exist. if not, generate audio_clips
-            print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Checking for existing audio clips")
-            try:
-                emit('movie_status', {'status': 'Checking for existing audio files'})
-            except RuntimeError as e:
-                print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Error emitting status: {e}")
-                return
+        if not audio_clips:
+            print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: No audio files, generating")
+            emit('movie_status', {'status': 'Creating text-to-speech audio files'})
+            generate_audio()
+            # Wait for the audio files to be generated before proceeding
+            # Check for each story_paragraph in story_data
+            for i in range(1, len(story_data['story']) + 1):
+                while not os.path.exists(f"{story_folder}/{story_id}_story_paragraph_{i}.wav"):
+                    time.sleep(1)
+            print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Audio file generation complete")
 
-            if not audio_clips:
-                print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: No audio files, generating")
-                emit('movie_status', {'status': 'Creating text-to-speech audio files'})
-                generate_audio()
-                # Wait for the audio files to be generated before proceeding
-                # Check for each story_paragraph in story_data
-                for i in range(1, len(story_data['story']) + 1):
-                    while not os.path.exists(f"{story_folder}/{story_id}_story_paragraph_{i}.wav"):
-                        time.sleep(1)
-                print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Audio file generation complete")
-
-            print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Existing audio files, skipping generation")
+        print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Existing audio files, skipping generation")
 
     except Exception as e:
         print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Audio regeneration error: {e}")
 
     try:
-        if not video_clip:
-            # Check if images exist. if not, generate them
-            print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Checking for existing image files")
-            emit('movie_status', {'status': 'Checking for existing image files'})
+        # Check if images exist. if not, generate them
+        print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Checking for existing image files")
+        emit('movie_status', {'status': 'Checking for existing image files'})
 
-            if not image_clips:
-                print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: No image files")
-                # Check if there is an image_urls object within story_data
-                if "image_urls" not in story_data:
-                    print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: No image files, generating")
-                    emit('movie_status', {'status': 'Generating new images to go with the story'})
-                    # If not, run the generate_images() function and wait until the function completes
-                    generate_images()
-                    while "image_urls" not in story_data:
-                        time.sleep(1)
+        if not image_clips:
+            print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: No image files")
+            # Check if there is an image_urls object within story_data
+            if "image_urls" not in story_data:
+                print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: No image files, generating")
+                emit('movie_status', {'status': 'Generating new images to go with the story'})
+                # If not, run the generate_images() function and wait until the function completes
+                generate_images()
+                while "image_urls" not in story_data:
+                    time.sleep(1)
 
-                # Check if the image_urls are responding 403, if so regenerate images
-                print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Checking if images are expired") 
-                emit('movie_status', {'status': 'Checking if image URLs have expired'})       
-                image_url = story_data["image_urls"][f"image_url_1"]
-                response = requests.get(image_url)
-                if response.status_code == 403:
-                    print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Image urls expired, regenerating images")
-                    emit('movie_status', {'status': 'Image urls expired, regenerating images'})
-                    generate_images()
+            # Check if the image_urls are responding 403, if so regenerate images
+            print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Checking if images are expired") 
+            emit('movie_status', {'status': 'Checking if image URLs have expired'})       
+            image_url = story_data["image_urls"][f"image_url_1"]
+            response = requests.get(image_url)
+            if response.status_code == 403:
+                print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Image urls expired, regenerating images")
+                emit('movie_status', {'status': 'Image urls expired, regenerating images'})
+                generate_images()
 
-                    print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Image regeneration success")
-                    emit('movie_status', {'status': 'Image regeneration success'})
+                print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Image regeneration success")
+                emit('movie_status', {'status': 'Image regeneration success'})
 
     except Exception as e:
         print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Image regeneration error: {e}")
                         
     finally:
-        if not video_clip:
-
-            # Download images
-            print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: downloading images")
-            emit('movie_status', {'status': 'Downloading images to use in the video'})
-            i = 1
-            while True:
-                image_filename = f"{story_folder}/{story_id}_image_url_{i}.png"
-                
-                if not os.path.exists(image_filename):
-                    if f"image_url_{i}" in story_data["image_urls"]:
-                        image_url = story_data["image_urls"][f"image_url_{i}"]
-                        response = requests.get(image_url)
-                        if response.status_code == 200:
-                            with open(image_filename, 'wb') as f:
-                                f.write(response.content)
-                                print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: downloaded new image: {image_filename}")
-                        else:
-                            break
+        # Download images
+        print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: downloading images")
+        emit('movie_status', {'status': 'Downloading images to use in the video'})
+        i = 1
+        while True:
+            image_filename = f"{story_folder}/{story_id}_image_url_{i}.png"
+            
+            if not os.path.exists(image_filename):
+                if f"image_url_{i}" in story_data["image_urls"]:
+                    image_url = story_data["image_urls"][f"image_url_{i}"]
+                    response = requests.get(image_url)
+                    if response.status_code == 200:
+                        with open(image_filename, 'wb') as f:
+                            f.write(response.content)
+                            print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: downloaded new image: {image_filename}")
                     else:
                         break
-                i += 1
-            print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {__name__}: images downloaded")
-            emit('movie_status', {'status': 'Images downloaded'})
-
-            # Generate video clips from the audio_clips and image_clips
-            print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {__name__}: creating movie clips")
-            emit('movie_status', {'status': 'Combining the audio and image files into video clips'})
-            i = 1
-            video_clips = []  # Initialize video_clips as an empty list
-            while True:
-                audio_filename = f"{story_folder}/{story_id}_story_paragraph_{i}.wav"
-                image_filename = f"{story_folder}/{story_id}_image_url_{i}.png"
-                if os.path.exists(audio_filename) and os.path.exists(image_filename):
-                    audio = AudioFileClip(audio_filename)
-                    image = ImageClip(image_filename, duration=audio.duration)
-                    video_clip = image.set_audio(audio)
-                    video_clips.append(video_clip.fx(vfx.speedx, 0.95))  # Slow down the video by 5%
                 else:
                     break
-                i += 1
+            i += 1
+        print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {__name__}: images downloaded")
+        emit('movie_status', {'status': 'Images downloaded'})
 
-            # Create a single video from all of the video_clips
-            if video_clips:
-                print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {__name__}: creating the movie")
-                emit('movie_status', {'status': 'Combining video clips into a single movie'})
+        # Generate video clips from the audio_clips and image_clips
+        print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {__name__}: creating movie clips")
+        emit('movie_status', {'status': 'Combining the audio and image files into video clips'})
+        i = 1
+        video_clips = []  # Initialize video_clips as an empty list
+        while True:
+            audio_filename = f"{story_folder}/{story_id}_story_paragraph_{i}.wav"
+            image_filename = f"{story_folder}/{story_id}_image_url_{i}.png"
+            if os.path.exists(audio_filename) and os.path.exists(image_filename):
+                audio = AudioFileClip(audio_filename)
+                image = ImageClip(image_filename, duration=audio.duration)
+                video_clip = image.set_audio(audio)
+                video_clips.append(video_clip.fx(vfx.speedx, 0.90))  # Slow down the video by 5%
+            else:
+                break
+            i += 1
 
-                final_video = concatenate_videoclips(video_clips)
-                final_video.write_videofile(f"{story_folder}/{story_id}_movie.mp4", fps=24, codec='libx264', audio_codec='aac')
-                    
-                print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {__name__}: movie created success")
-                emit('movie_status', {'status': 'Movie creation success'})
-                emit('new_movie', {'status': f"{story_folder}/{story_id}_movie.mp4"})
+        # Create a single video from all of the video_clips
+        if video_clips:
+            print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {__name__}: creating the movie")
+            emit('movie_status', {'status': 'Combining video clips into a single movie'})
+
+            final_video = concatenate_videoclips(video_clips)
+            final_video.write_videofile(f"{story_folder}/{story_id}_movie.mp4", fps=24, codec='libx264', audio_codec='aac')
+                
+            print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {__name__}: movie created success")
+            emit('movie_status', {'status': 'Movie creation success'})
+            emit('new_movie', {'status': f"{story_folder}/{story_id}_movie.mp4"})
 
 # Generate images for each image_prompt in story_data, save the image URLs, and update the database
 def generate_images():
     global unique_id, db
+    global stories, story_data, story_id, story_folder
+
     try:
         print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - Running generate_images")
-
-        # Get the most recent story from the database
-        stories = db.all()
-        stories.sort(key=lambda x: x['timestamp'], reverse=True)
-        story_data = stories[0]['story_data']
-        story_id = stories[0]['unique_id']
 
         # Initialize an empty dictionary for image_urls
         story_data["image_urls"] = {}
@@ -449,16 +431,10 @@ def generate_images():
         print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - Error in generate_images function: {e}\n")
 
 def generate_audio():
-    global db
+    global stories, story_data, story_id, story_folder
+
     try:
         print(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} - {inspect.stack()[0][3]}: Running generate_audio")
-
-        # Get the most recent story from the database
-        stories = db.all()
-        stories.sort(key=lambda x: x['timestamp'], reverse=True)
-        story_data = stories[0]['story_data']
-        story_id = stories[0]['unique_id']
-        story_folder = 'static/stories/' + story_id
 
         # Initialize an empty dictionary for audio_urls
         story_data["audio_urls"] = {}

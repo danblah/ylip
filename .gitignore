@@ -4,6 +4,7 @@
 **/__pycache__
 **/.DS_Store
 .env
-data/db.json
+data/db.content.json
+data/db.config.json
 static/stories
 **/.cursor-tutor.*

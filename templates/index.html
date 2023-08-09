@@ -63,14 +63,14 @@
                 document.getElementById('movie').style.display = 'block';
                 document.getElementById('generate_movie').style.display = 'block'; // Show the "Generate a new movie" button when movie is ready
                 document.getElementById('direct_link').style.display = 'block'; // Show the "Video link" url when movie is ready
-                location.reload(); // Reload the page after the new movie has finished generating
+                // location.reload(); // Comment out this line
             });
             function generateMovie() {
-                document.getElementById('generate_movie').style.display = 'none';
-                document.getElementById('movie').style.display = 'none'; // Hide the current movie when "Generate a new movie" has been pressed
-                document.getElementById('direct_link').style.display = 'none'; // Hide the "Video link" url when "Generate a new movie" has been pressed
-                socket.emit('create_movie');
-                console.log('Generate new movie button pressed');
+                    document.getElementById('generate_movie').style.display = 'none';
+                    document.getElementById('movie').style.display = 'none'; // Hide the current movie when "Generate a new movie" has been pressed
+                    document.getElementById('direct_link').style.display = 'none'; // Hide the "Video link" url when "Generate a new movie" has been pressed
+                    socket.emit('create_movie');
+                    console.log('Generate new movie button pressed');
             };
             function fadeOut(id) {
                 var element = document.getElementById(id);
